@@ -10,7 +10,7 @@ It lets pilots:
 - Submit up to 8 OFF days and 14 combined OFF + PTO days per month
 - Cancel their own submitted days by tapping them on the calendar
 
-It also prevents more than one pilot from being off on the same day for a 3-pilot crew. The `1111` PIN is the admin login, which can export the month and add scheduled trip markers for visibility.
+It also prevents more than one pilot from being off on the same day for a 3-pilot crew. The `1111` PIN is the admin login, which can export the month, clear a selected month, and add scheduled trip markers for visibility.
 
 ## Files
 
@@ -66,4 +66,4 @@ Keep real pilot PINs in Apps Script only. Do not put real PINs in the public Git
 
 ## Export
 
-Use the hamburger menu in the scheduler while signed in with PIN `1111` to export the selected bid month. The download is an Excel-compatible CSV listed by pilot, with scheduled trips included as separate trip entries.
+Use the hamburger menu in the scheduler while signed in with PIN `1111` to export or clear the selected bid month. The download is an Excel-compatible CSV listed by pilot, with scheduled trips included as separate trip entries.

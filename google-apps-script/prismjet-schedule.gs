@@ -123,6 +123,10 @@ function handleAction_(action, params) {
     return cancelTrip_(params);
   }
 
+  if (action === "resetMonth") {
+    return resetMonth_(params);
+  }
+
   throw new Error("Unknown schedule action.");
 }
 
@@ -399,6 +403,62 @@ function cancelTrip_(params) {
   }
 }
 
+function resetMonth_(params) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    requireAdmin_(params.pin);
+    const bidMonth = String(params.bidMonth || "");
+
+    if (!/^\d{4}-\d{2}$/.test(bidMonth)) {
+      throw new Error("Bid month is invalid.");
+    }
+
+    const requestSheet = getRequestSheet_();
+    const requestValues = requestSheet.getDataRange().getValues();
+    let clearedRequests = 0;
+
+    for (let rowIndex = 1; rowIndex < requestValues.length; rowIndex += 1) {
+      const row = requestValues[rowIndex];
+      const rowMonth = String(row[2] || "");
+      const rowDate = formatDateKey_(row[5]);
+      const rowStatus = String(row[9] || "submitted").toLowerCase();
+
+      if ((rowMonth === bidMonth || rowDate.indexOf(bidMonth + "-") === 0) && rowStatus !== "cancelled") {
+        requestSheet.getRange(rowIndex + 1, 10).setValue("cancelled");
+        clearedRequests += 1;
+      }
+    }
+
+    const tripSheet = getTripSheet_();
+    const tripValues = tripSheet.getDataRange().getValues();
+    let clearedTrips = 0;
+
+    for (let rowIndex = 1; rowIndex < tripValues.length; rowIndex += 1) {
+      const row = tripValues[rowIndex];
+      const rowMonth = String(row[2] || "");
+      const rowDate = formatDateKey_(row[3]);
+      const rowStatus = String(row[5] || "submitted").toLowerCase();
+
+      if ((rowMonth === bidMonth || rowDate.indexOf(bidMonth + "-") === 0) && rowStatus !== "cancelled") {
+        tripSheet.getRange(rowIndex + 1, 6).setValue("cancelled");
+        clearedTrips += 1;
+      }
+    }
+
+    return {
+      ok: true,
+      clearedRequests: clearedRequests,
+      clearedTrips: clearedTrips,
+      requests: getRequests_(),
+      trips: getTrips_(),
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function parseDays_(value) {
   let parsed;
   try {
@@ -474,7 +534,7 @@ function requirePilot_(pin) {
 function requireAdmin_(pin) {
   const pilot = requirePilot_(pin);
   if (String(pin || "").trim() !== String(SCHEDULE.adminPin)) {
-    throw new Error("Only the admin PIN can add or remove trip days.");
+    throw new Error("Only the admin PIN can make admin calendar changes.");
   }
   return pilot;
 }

@@ -77,6 +77,7 @@ const elements = {
   scheduleApp: document.querySelector("#schedule-app"),
   refreshButton: document.querySelector("#refresh-schedule-button"),
   exportButton: document.querySelector("#export-calendar-button"),
+  resetMonthButton: document.querySelector("#reset-month-button"),
   menuButton: document.querySelector("#schedule-menu-button"),
   menu: document.querySelector("#schedule-menu"),
   signOutButton: document.querySelector("#sign-out-button"),
@@ -121,6 +122,7 @@ function bindEvents() {
   elements.signOutButton.addEventListener("click", signOut);
   elements.refreshButton.addEventListener("click", refreshRequests);
   elements.exportButton.addEventListener("click", exportCalendar);
+  elements.resetMonthButton.addEventListener("click", resetSelectedMonth);
   elements.menuButton.addEventListener("click", toggleMenu);
   document.addEventListener("click", closeMenuOnOutsideClick);
   elements.bidMonth.addEventListener("change", handleMonthInput);
@@ -527,6 +529,51 @@ async function exportCalendar() {
   showMessage(elements.scheduleMessage, `Exported ${exportedCount} ${exportedCount === 1 ? "entry" : "entries"}.`, "success");
 }
 
+async function resetSelectedMonth() {
+  if (!state.session) {
+    return;
+  }
+
+  closeMenu();
+
+  if (!isAdminSession()) {
+    showMessage(elements.scheduleMessage, "Only the admin PIN can clear a month.", "error");
+    return;
+  }
+
+  const monthLabel = formatMonthLabel(state.selectedMonth);
+  const confirmed = window.confirm(`Clear all requests and trips for ${monthLabel}?`);
+  if (!confirmed) {
+    return;
+  }
+
+  setBusy(true);
+  showMessage(elements.scheduleMessage, `Clearing ${monthLabel}...`, "muted");
+
+  try {
+    const response = await callApi("resetMonth", {
+      pin: state.session.pin,
+      bidMonth: state.selectedMonth,
+    });
+
+    if (!response.ok) {
+      throw new Error(response.error || "Month could not be cleared.");
+    }
+
+    state.requests = normalizeRequests(response.requests);
+    state.trips = normalizeTrips(response.trips);
+    state.draft.clear();
+    const cleared = Number(response.clearedRequests || 0) + Number(response.clearedTrips || 0);
+    showMessage(elements.scheduleMessage, `${monthLabel} cleared (${cleared} ${cleared === 1 ? "entry" : "entries"}).`, "success");
+    renderAll();
+  } catch (error) {
+    console.error(error);
+    showMessage(elements.scheduleMessage, error.message || "Month could not be cleared.", "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function submitDraft() {
   if (!state.session) {
     return;
@@ -626,6 +673,7 @@ function renderSessionState() {
   elements.signOutButton.hidden = !isLoggedIn;
   elements.menuButton.hidden = !isLoggedIn;
   elements.exportButton.hidden = !isAdmin;
+  elements.resetMonthButton.hidden = !isAdmin;
   elements.menu.hidden = true;
   elements.menuButton.setAttribute("aria-expanded", "false");
   renderEntryControls();
@@ -893,6 +941,12 @@ function getTripsForMonth(monthKey) {
   return state.trips
     .filter((trip) => trip.bidMonth === monthKey || trip.date.startsWith(`${monthKey}-`))
     .sort(sortTrips);
+}
+
+function isEntryInMonth(entry, monthKey) {
+  const bidMonth = String(entry.bidMonth || "");
+  const date = String(entry.date || "");
+  return bidMonth === monthKey || date.startsWith(`${monthKey}-`);
 }
 
 function groupRequestsByPilot(requests) {
@@ -1211,6 +1265,56 @@ async function callDemoApi(action, params = {}) {
     };
   }
 
+  if (action === "resetMonth") {
+    if (String(params.pin || "") !== ADMIN_PIN) {
+      return {
+        ok: false,
+        error: "Only the admin PIN can clear a month.",
+      };
+    }
+
+    const bidMonth = String(params.bidMonth || "");
+    if (!isMonthKey(bidMonth)) {
+      return {
+        ok: false,
+        error: "Bid month is invalid.",
+      };
+    }
+
+    let clearedRequests = 0;
+    let clearedTrips = 0;
+    const nextRequests = readRawDemoRequests().map((request) => {
+      if (isEntryInMonth(request, bidMonth) && request.status !== "cancelled") {
+        clearedRequests += 1;
+        return {
+          ...request,
+          status: "cancelled",
+        };
+      }
+      return request;
+    });
+    const nextTrips = readRawDemoTrips().map((trip) => {
+      if (isEntryInMonth(trip, bidMonth) && trip.status !== "cancelled") {
+        clearedTrips += 1;
+        return {
+          ...trip,
+          status: "cancelled",
+        };
+      }
+      return trip;
+    });
+
+    window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(nextRequests));
+    window.localStorage.setItem(DEMO_TRIPS_STORAGE_KEY, JSON.stringify(nextTrips));
+    return {
+      ok: true,
+      clearedRequests,
+      clearedTrips,
+      requests: nextRequests,
+      trips: nextTrips,
+    };
+  }
+
   return {
     ok: false,
     error: "Unknown schedule action.",
@@ -1416,6 +1520,7 @@ function setBusy(isBusy) {
     elements.pilotPin,
     elements.refreshButton,
     elements.exportButton,
+    elements.resetMonthButton,
     elements.menuButton,
     elements.signOutButton,
     elements.bidMonth,
