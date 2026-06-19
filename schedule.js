@@ -4,10 +4,12 @@ const DEFAULT_LIMITS = {
   maxRequestsPerDay: 1,
 };
 
+const ADMIN_PIN = "1111";
+
 const DEMO_PILOTS = [
   { id: "pilot-a", name: "Pilot A", initials: "A", color: "#2f6fb3" },
-  { id: "pilot-b", name: "Pilot B", initials: "B", color: "#2f7d5b" },
-  { id: "pilot-c", name: "Pilot C", initials: "C", color: "#b36b20" },
+  { id: "pilot-b", name: "Ian Crouse", initials: "IC", color: "#2f7d5b" },
+  { id: "pilot-c", name: "Zach Stolarow", initials: "ZS", color: "#b36b20" },
 ];
 
 const DEMO_PINS = {
@@ -17,6 +19,7 @@ const DEMO_PINS = {
 };
 
 const DEMO_STORAGE_KEY = "prismjetScheduleDemoRequests";
+const DEMO_TRIPS_STORAGE_KEY = "prismjetScheduleDemoTrips";
 const SESSION_STORAGE_KEY = "prismjetScheduleLastPilot";
 const API_TIMEOUT_MS = 12000;
 
@@ -28,6 +31,10 @@ const REQUEST_TYPE_META = {
   pto: {
     label: "PTO",
     fullLabel: "PTO",
+  },
+  trip: {
+    label: "TRIP",
+    fullLabel: "Scheduled trip",
   },
 };
 
@@ -53,6 +60,7 @@ const state = {
   pilots: DEMO_PILOTS,
   session: null,
   requests: [],
+  trips: [],
   selectedMonth: getNextMonthKey(),
   draft: new Map(),
   currentType: "regular",
@@ -83,6 +91,7 @@ const elements = {
   previousMonthButton: document.querySelector("#previous-month-button"),
   nextMonthButton: document.querySelector("#next-month-button"),
   requestTypePicker: document.querySelector("#request-type-picker"),
+  tripTypeOption: document.querySelector("#trip-type-option"),
   priorityPicker: document.querySelector("#priority-picker"),
   calendarGrid: document.querySelector("#calendar-grid"),
   draftCaption: document.querySelector("#draft-caption"),
@@ -177,6 +186,7 @@ async function handleLogin(event) {
       pilot: normalizePilot(response.pilot),
     };
     state.requests = normalizeRequests(response.requests);
+    state.trips = normalizeTrips(response.trips);
     state.draft.clear();
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, state.session.pilot.name);
     elements.pilotPin.value = "";
@@ -193,6 +203,7 @@ async function handleLogin(event) {
 function signOut() {
   state.session = null;
   state.draft.clear();
+  state.currentType = "regular";
   showMessage(elements.scheduleMessage, "", "muted");
   closeMenu();
   renderAll();
@@ -214,6 +225,7 @@ async function refreshRequests() {
     }
 
     state.requests = normalizeRequests(response.requests);
+    state.trips = normalizeTrips(response.trips);
     showMessage(elements.scheduleMessage, "Calendar refreshed.", "success");
     closeMenu();
     renderAll();
@@ -234,6 +246,7 @@ async function refreshRequestsFromStore() {
     const response = await callApi("requests", { pin: state.session.pin });
     if (response.ok) {
       state.requests = normalizeRequests(response.requests);
+      state.trips = normalizeTrips(response.trips);
       renderAll();
     }
   } catch (error) {
@@ -266,6 +279,7 @@ function handlePickerChange(event) {
 
   if (target.name === "requestType") {
     state.currentType = target.value;
+    renderEntryControls();
   }
 
   if (target.name === "priority") {
@@ -308,6 +322,36 @@ function handleCalendarClick(event) {
   if (state.draft.has(date)) {
     state.draft.delete(date);
     showMessage(elements.scheduleMessage, `${formatShortDate(date)} removed from draft.`, "muted");
+    renderAll();
+    return;
+  }
+
+  if (state.currentType === "trip") {
+    if (!isAdminSession()) {
+      showMessage(elements.scheduleMessage, "Only the admin PIN can add trip days.", "error");
+      return;
+    }
+
+    if (getTripForDate(date)) {
+      cancelTripDate(date);
+      return;
+    }
+
+    const nextDraft = new Map(state.draft);
+    nextDraft.set(date, {
+      date,
+      type: "trip",
+      priority: "medium",
+    });
+
+    const error = validateDraft([...nextDraft.values()]);
+    if (error) {
+      showMessage(elements.scheduleMessage, error, "error");
+      return;
+    }
+
+    state.draft = nextDraft;
+    showMessage(elements.scheduleMessage, `${formatShortDate(date)} trip added.`, "success");
     renderAll();
     return;
   }
@@ -371,11 +415,50 @@ async function cancelSubmittedDate(date) {
     }
 
     state.requests = normalizeRequests(response.requests);
+    state.trips = normalizeTrips(response.trips);
     showMessage(elements.scheduleMessage, `${formatShortDate(date)} cancelled.`, "success");
     renderAll();
   } catch (error) {
     console.error(error);
     showMessage(elements.scheduleMessage, error.message || "Request could not be cancelled.", "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelTripDate(date) {
+  const trip = getTripForDate(date);
+  if (!trip) {
+    showMessage(elements.scheduleMessage, "That trip day is no longer active.", "error");
+    renderAll();
+    return;
+  }
+
+  const confirmed = window.confirm(`Remove scheduled trip on ${formatShortDate(date)}?`);
+  if (!confirmed) {
+    return;
+  }
+
+  setBusy(true);
+  showMessage(elements.scheduleMessage, `Removing ${formatShortDate(date)} trip...`, "muted");
+
+  try {
+    const response = await callApi("cancelTrip", {
+      pin: state.session.pin,
+      date,
+    });
+
+    if (!response.ok) {
+      throw new Error(response.error || "Trip day could not be removed.");
+    }
+
+    state.requests = normalizeRequests(response.requests);
+    state.trips = normalizeTrips(response.trips);
+    showMessage(elements.scheduleMessage, `${formatShortDate(date)} trip removed.`, "success");
+    renderAll();
+  } catch (error) {
+    console.error(error);
+    showMessage(elements.scheduleMessage, error.message || "Trip day could not be removed.", "error");
   } finally {
     setBusy(false);
   }
@@ -388,28 +471,46 @@ async function exportCalendar() {
 
   closeMenu();
 
+  if (!isAdminSession()) {
+    showMessage(elements.scheduleMessage, "Only the admin PIN can export the calendar.", "error");
+    return;
+  }
+
   try {
     const response = await callApi("requests", { pin: state.session.pin });
     if (response.ok) {
       state.requests = normalizeRequests(response.requests);
+      state.trips = normalizeTrips(response.trips);
       renderAll();
     }
   } catch (error) {
     console.warn("Export used the currently loaded calendar", error);
   }
 
-  const rows = getRequestsForMonth(state.selectedMonth);
-  const headers = ["Bid Month", "Date", "Pilot", "Type", "Priority", "Submitted At", "Notes"];
+  const requestRows = getRequestsForMonth(state.selectedMonth).sort(sortRequestsByPilot);
+  const tripRows = getTripsForMonth(state.selectedMonth);
+  const headers = ["Pilot / Entry", "Entry Type", "Date", "Request Type", "Priority", "Bid Month", "Submitted At", "Notes"];
   const csvRows = [
     headers,
-    ...rows.map((request) => [
-      request.bidMonth,
-      request.date,
+    ...requestRows.map((request) => [
       request.pilotName,
+      "Pilot Request",
+      request.date,
       REQUEST_TYPE_META[request.type].label,
       PRIORITY_META[request.priority].fullLabel,
+      request.bidMonth,
       request.submittedAt,
       request.notes,
+    ]),
+    ...tripRows.map((trip) => [
+      "Scheduled Trip",
+      "Trip",
+      trip.date,
+      REQUEST_TYPE_META.trip.label,
+      "",
+      trip.bidMonth,
+      trip.submittedAt,
+      trip.notes,
     ]),
   ];
   const csv = csvRows.map((row) => row.map(formatCsvCell).join(",")).join("\r\n");
@@ -422,7 +523,8 @@ async function exportCalendar() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  showMessage(elements.scheduleMessage, `Exported ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`, "success");
+  const exportedCount = requestRows.length + tripRows.length;
+  showMessage(elements.scheduleMessage, `Exported ${exportedCount} ${exportedCount === 1 ? "entry" : "entries"}.`, "success");
 }
 
 async function submitDraft() {
@@ -443,24 +545,52 @@ async function submitDraft() {
     return;
   }
 
+  const requestDays = days.filter((day) => day.type !== "trip");
+  const tripDays = days.filter((day) => day.type === "trip");
+
   setBusy(true);
-  showMessage(elements.scheduleMessage, "Submitting request...", "muted");
+  showMessage(elements.scheduleMessage, tripDays.length && !requestDays.length ? "Saving trip days..." : "Submitting request...", "muted");
 
   try {
-    const response = await callApi("submit", {
-      pin: state.session.pin,
-      bidMonth: state.selectedMonth,
-      notes: "",
-      days: JSON.stringify(days),
-    });
+    let savedRequests = 0;
+    let savedTrips = 0;
 
-    if (!response.ok) {
-      throw new Error(response.error || "Request could not be submitted.");
+    if (requestDays.length) {
+      const response = await callApi("submit", {
+        pin: state.session.pin,
+        bidMonth: state.selectedMonth,
+        notes: "",
+        days: JSON.stringify(requestDays),
+      });
+
+      if (!response.ok) {
+        throw new Error(response.error || "Request could not be submitted.");
+      }
+
+      savedRequests = Number(response.saved || requestDays.length);
+      state.requests = normalizeRequests(response.requests);
+      state.trips = normalizeTrips(response.trips);
     }
 
-    state.requests = normalizeRequests(response.requests);
+    if (tripDays.length) {
+      const response = await callApi("submitTrips", {
+        pin: state.session.pin,
+        bidMonth: state.selectedMonth,
+        notes: "",
+        days: JSON.stringify(tripDays.map((day) => ({ date: day.date }))),
+      });
+
+      if (!response.ok) {
+        throw new Error(response.error || "Trip days could not be saved.");
+      }
+
+      savedTrips = Number(response.saved || tripDays.length);
+      state.requests = normalizeRequests(response.requests);
+      state.trips = normalizeTrips(response.trips);
+    }
+
     state.draft.clear();
-    showMessage(elements.scheduleMessage, `${response.saved || days.length} day request saved.`, "success");
+    showMessage(elements.scheduleMessage, formatSaveMessage(savedRequests, savedTrips), "success");
     renderAll();
   } catch (error) {
     console.error(error);
@@ -490,12 +620,15 @@ function renderModeBanner() {
 
 function renderSessionState() {
   const isLoggedIn = Boolean(state.session);
+  const isAdmin = isAdminSession();
   elements.loginPanel.hidden = isLoggedIn;
   elements.scheduleApp.hidden = !isLoggedIn;
   elements.signOutButton.hidden = !isLoggedIn;
   elements.menuButton.hidden = !isLoggedIn;
+  elements.exportButton.hidden = !isAdmin;
   elements.menu.hidden = true;
   elements.menuButton.setAttribute("aria-expanded", "false");
+  renderEntryControls();
 
   if (!isLoggedIn) {
     elements.sessionSummary.textContent = "Shared calendar for regular days off and PTO requests.";
@@ -505,13 +638,33 @@ function renderSessionState() {
   elements.sessionSummary.textContent = `Signed in as ${state.session.pilot.name}.`;
 }
 
+function renderEntryControls() {
+  const isAdmin = isAdminSession();
+  if (elements.tripTypeOption) {
+    elements.tripTypeOption.hidden = !isAdmin;
+  }
+
+  if (!isAdmin && state.currentType === "trip") {
+    state.currentType = "regular";
+  }
+
+  const currentTypeInput = elements.requestTypePicker.querySelector(`input[name="requestType"][value="${state.currentType}"]`);
+  if (currentTypeInput) {
+    currentTypeInput.checked = true;
+  }
+
+  elements.priorityPicker.hidden = state.currentType === "trip";
+}
+
 function renderSummary() {
   const days = getSortedDraftDays();
+  const requestDays = days.filter((day) => day.type !== "trip");
   const ownMonthRequests = getOwnRequestsForMonth(state.selectedMonth);
   const regularCount = ownMonthRequests.filter((request) => request.type === "regular").length +
-    days.filter((day) => day.type === "regular").length;
-  const totalCount = ownMonthRequests.length + days.length;
+    requestDays.filter((day) => day.type === "regular").length;
+  const totalCount = ownMonthRequests.length + requestDays.length;
   const monthRequests = getRequestsForMonth(state.selectedMonth);
+  const monthTrips = getTripsForMonth(state.selectedMonth);
   const monthLabel = formatMonthLabel(state.selectedMonth);
 
   elements.regularCount.textContent = `${regularCount}/${state.limits.maxRegularDays}`;
@@ -520,7 +673,7 @@ function renderSummary() {
   elements.monthRequestCaption.textContent = monthLabel;
   elements.monthHeading.textContent = monthLabel;
   elements.calendarHeading.textContent = monthLabel;
-  elements.calendarCaption.textContent = `${monthRequests.length} submitted ${pluralize(monthRequests.length, "request")}. Tap your own submitted day to cancel it.`;
+  elements.calendarCaption.textContent = `${monthRequests.length} submitted ${pluralize(monthRequests.length, "request")}${monthTrips.length ? `, ${monthTrips.length} scheduled ${pluralize(monthTrips.length, "trip")}` : ""}. Tap your own submitted day to cancel it.`;
 }
 
 function renderCalendar() {
@@ -542,6 +695,7 @@ function renderCalendar() {
   for (let day = 1; day <= daysInMonth; day += 1) {
     const date = `${monthKey}-${String(day).padStart(2, "0")}`;
     const requests = getRequestsForDate(date);
+    const trips = getTripsForDate(date);
     const isSelected = state.draft.has(date);
     const isPast = date < today;
     const hasOwnRequest = hasOwnSubmittedRequest(date);
@@ -550,7 +704,7 @@ function renderCalendar() {
     button.type = "button";
     button.dataset.date = date;
     button.disabled = isPast;
-    button.setAttribute("aria-label", buildDayAriaLabel(date, requests, isSelected));
+    button.setAttribute("aria-label", buildDayAriaLabel(date, requests, trips, isSelected));
 
     if (isSelected) {
       button.classList.add("selected");
@@ -558,6 +712,10 @@ function renderCalendar() {
 
     if (hasOwnRequest) {
       button.classList.add("own-request");
+    }
+
+    if (trips.length) {
+      button.classList.add("has-trip");
     }
 
     if (requests.length >= state.limits.maxRequestsPerDay && !hasOwnRequest) {
@@ -575,6 +733,7 @@ function renderCalendar() {
 
     const chipStack = document.createElement("span");
     chipStack.className = "calendar-chip-stack";
+    trips.forEach((trip) => chipStack.appendChild(buildTripChip(trip)));
     requests.forEach((request) => chipStack.appendChild(buildRequestChip(request)));
     button.appendChild(chipStack);
 
@@ -585,8 +744,10 @@ function renderCalendar() {
 function renderDraft() {
   const days = getSortedDraftDays();
   const regularCount = days.filter((day) => day.type === "regular").length;
+  const ptoCount = days.filter((day) => day.type === "pto").length;
+  const tripCount = days.filter((day) => day.type === "trip").length;
   elements.draftCaption.textContent = days.length
-    ? `${regularCount} OFF, ${days.length - regularCount} PTO, ${days.length} total`
+    ? `${regularCount} OFF, ${ptoCount} PTO${tripCount ? `, ${tripCount} trip${tripCount === 1 ? "" : "s"}` : ""}`
     : "No days selected.";
   elements.submitRequestButton.disabled = !days.length;
 }
@@ -602,18 +763,31 @@ function buildRequestChip(request) {
   return chip;
 }
 
-function buildDraftChip(day) {
+function buildTripChip(trip) {
   const chip = document.createElement("span");
-  chip.className = `draft-chip draft-chip-${day.type}`;
-  chip.textContent = `${REQUEST_TYPE_META[day.type].label} ${PRIORITY_META[day.priority].label}`;
+  chip.className = "trip-chip";
+  chip.title = `Scheduled trip: ${formatLongDate(trip.date)}`;
+  chip.textContent = REQUEST_TYPE_META.trip.label;
   return chip;
 }
 
-function buildDayAriaLabel(date, requests, isSelected) {
+function buildDraftChip(day) {
+  const chip = document.createElement("span");
+  chip.className = `draft-chip draft-chip-${day.type}`;
+  chip.textContent = day.type === "trip"
+    ? REQUEST_TYPE_META.trip.label
+    : `${REQUEST_TYPE_META[day.type].label} ${PRIORITY_META[day.priority].label}`;
+  return chip;
+}
+
+function buildDayAriaLabel(date, requests, trips, isSelected) {
   const parts = [formatLongDate(date)];
   if (isSelected) {
     parts.push("selected in draft");
   }
+  trips.forEach(() => {
+    parts.push("scheduled trip");
+  });
   requests.forEach((request) => {
     parts.push(`${request.pilotName} ${REQUEST_TYPE_META[request.type].fullLabel} ${PRIORITY_META[request.priority].fullLabel}`);
   });
@@ -625,15 +799,21 @@ function getSortedDraftDays() {
 }
 
 function validateDraft(days) {
+  const requestDays = days.filter((day) => day.type !== "trip");
+  const tripDays = days.filter((day) => day.type === "trip");
   const ownMonthRequests = getOwnRequestsForMonth(state.selectedMonth);
   const existingTotal = ownMonthRequests.length;
   const existingRegular = ownMonthRequests.filter((request) => request.type === "regular").length;
-  const total = existingTotal + days.length;
-  const regular = existingRegular + days.filter((day) => day.type === "regular").length;
+  const total = existingTotal + requestDays.length;
+  const regular = existingRegular + requestDays.filter((day) => day.type === "regular").length;
   const uniqueDates = new Set(days.map((day) => day.date));
 
   if (days.length !== uniqueDates.size) {
     return "Each date can only be selected once.";
+  }
+
+  if (tripDays.length && !isAdminSession()) {
+    return "Only the admin PIN can add trip days.";
   }
 
   if (regular > state.limits.maxRegularDays) {
@@ -653,7 +833,12 @@ function validateDraft(days) {
     return "Selected days must be inside the bid month.";
   }
 
-  const unavailableDay = days.find((day) => getRequestsForDate(day.date).length >= state.limits.maxRequestsPerDay);
+  const duplicateTrip = tripDays.find((day) => getTripForDate(day.date));
+  if (duplicateTrip) {
+    return `${formatShortDate(duplicateTrip.date)} already has a scheduled trip.`;
+  }
+
+  const unavailableDay = requestDays.find((day) => getRequestsForDate(day.date).length >= state.limits.maxRequestsPerDay);
   if (unavailableDay) {
     const existing = getRequestsForDate(unavailableDay.date)[0];
     return `${formatShortDate(unavailableDay.date)} already has ${existing.pilotName} off.`;
@@ -694,6 +879,22 @@ function getRequestsForMonth(monthKey) {
     .sort(sortRequests);
 }
 
+function getTripForDate(date) {
+  return getTripsForDate(date)[0] || null;
+}
+
+function getTripsForDate(date) {
+  return state.trips
+    .filter((trip) => trip.date === date)
+    .sort(sortTrips);
+}
+
+function getTripsForMonth(monthKey) {
+  return state.trips
+    .filter((trip) => trip.bidMonth === monthKey || trip.date.startsWith(`${monthKey}-`))
+    .sort(sortTrips);
+}
+
 function groupRequestsByPilot(requests) {
   const groups = new Map();
   requests.forEach((request) => {
@@ -718,6 +919,18 @@ function sortRequests(a, b) {
   return a.pilotName.localeCompare(b.pilotName);
 }
 
+function sortRequestsByPilot(a, b) {
+  const pilotSort = a.pilotName.localeCompare(b.pilotName);
+  if (pilotSort !== 0) {
+    return pilotSort;
+  }
+  return sortRequests(a, b);
+}
+
+function sortTrips(a, b) {
+  return a.date.localeCompare(b.date);
+}
+
 function getPilot(pilotId) {
   return state.pilots.find((pilot) => pilot.id === pilotId) || {
     id: pilotId,
@@ -725,6 +938,15 @@ function getPilot(pilotId) {
     initials: "P",
     color: "#6c6257",
   };
+}
+
+function getPilotDisplayName(pilotId, fallback) {
+  const pilot = state.pilots.find((item) => item.id === pilotId);
+  return pilot?.name || String(fallback || "Pilot");
+}
+
+function isAdminSession() {
+  return state.session?.pin === ADMIN_PIN;
 }
 
 async function callApi(action, params = {}) {
@@ -801,6 +1023,7 @@ async function callDemoApi(action, params = {}) {
       ok: true,
       pilot,
       requests: readDemoRequests(),
+      trips: readDemoTrips(),
     };
   }
 
@@ -808,6 +1031,7 @@ async function callDemoApi(action, params = {}) {
     return {
       ok: true,
       requests: readDemoRequests(),
+      trips: readDemoTrips(),
     };
   }
 
@@ -854,6 +1078,46 @@ async function callDemoApi(action, params = {}) {
       ok: true,
       saved: days.length,
       requests: nextRequests,
+      trips: readDemoTrips(),
+    };
+  }
+
+  if (action === "submitTrips") {
+    if (String(params.pin || "") !== ADMIN_PIN) {
+      return {
+        ok: false,
+        error: "Only the admin PIN can add trip days.",
+      };
+    }
+
+    const days = safeJsonParse(params.days, []);
+    const error = validateSubmittedTrips(days, params.bidMonth, readDemoTrips());
+    if (error) {
+      return {
+        ok: false,
+        error,
+      };
+    }
+
+    const submittedAt = new Date().toISOString();
+    const nextTrips = [
+      ...readDemoTrips(),
+      ...days.map((day) => ({
+        id: createId(),
+        submittedAt,
+        bidMonth: params.bidMonth,
+        date: String(day.date || ""),
+        notes: String(params.notes || ""),
+        status: "submitted",
+      })),
+    ];
+
+    window.localStorage.setItem(DEMO_TRIPS_STORAGE_KEY, JSON.stringify(nextTrips));
+    return {
+      ok: true,
+      saved: days.length,
+      requests: readDemoRequests(),
+      trips: nextTrips,
     };
   }
 
@@ -899,6 +1163,51 @@ async function callDemoApi(action, params = {}) {
       ok: true,
       cancelled,
       requests: nextRequests,
+      trips: readDemoTrips(),
+    };
+  }
+
+  if (action === "cancelTrip") {
+    if (String(params.pin || "") !== ADMIN_PIN) {
+      return {
+        ok: false,
+        error: "Only the admin PIN can remove trip days.",
+      };
+    }
+
+    const date = String(params.date || "");
+    if (!isDateKey(date)) {
+      return {
+        ok: false,
+        error: "Date is invalid.",
+      };
+    }
+
+    let cancelled = 0;
+    const nextTrips = readRawDemoTrips().map((trip) => {
+      if (trip.date === date && trip.status !== "cancelled") {
+        cancelled += 1;
+        return {
+          ...trip,
+          status: "cancelled",
+        };
+      }
+      return trip;
+    });
+
+    if (!cancelled) {
+      return {
+        ok: false,
+        error: "That trip day is no longer active.",
+      };
+    }
+
+    window.localStorage.setItem(DEMO_TRIPS_STORAGE_KEY, JSON.stringify(nextTrips));
+    return {
+      ok: true,
+      cancelled,
+      requests: readDemoRequests(),
+      trips: nextTrips,
     };
   }
 
@@ -975,6 +1284,39 @@ function validateSubmittedDays(days, bidMonth, pilotId, existingRequests) {
   return "";
 }
 
+function validateSubmittedTrips(days, bidMonth, existingTrips) {
+  if (!Array.isArray(days) || !days.length) {
+    return "Select at least one trip day.";
+  }
+
+  const normalizedDays = days.map((day) => ({
+    date: String(day.date || ""),
+  }));
+  const uniqueDates = new Set(normalizedDays.map((day) => day.date));
+
+  if (!isMonthKey(bidMonth)) {
+    return "Bid month is invalid.";
+  }
+
+  if (normalizedDays.length !== uniqueDates.size) {
+    return "Each trip date can only be selected once.";
+  }
+
+  const invalidDate = normalizedDays.find((day) => !isDateKey(day.date) || !day.date.startsWith(`${bidMonth}-`));
+  if (invalidDate) {
+    return "Trip days must be inside the bid month.";
+  }
+
+  const duplicate = normalizedDays.find((day) =>
+    existingTrips.some((trip) => trip.date === day.date && trip.status !== "cancelled")
+  );
+  if (duplicate) {
+    return `${formatShortDate(duplicate.date)} already has a scheduled trip.`;
+  }
+
+  return "";
+}
+
 function readDemoRequests() {
   return normalizeRequests(readRawDemoRequests());
 }
@@ -982,6 +1324,15 @@ function readDemoRequests() {
 function readRawDemoRequests() {
   const requests = safeJsonParse(window.localStorage.getItem(DEMO_STORAGE_KEY), []);
   return Array.isArray(requests) ? requests : [];
+}
+
+function readDemoTrips() {
+  return normalizeTrips(readRawDemoTrips());
+}
+
+function readRawDemoTrips() {
+  const trips = safeJsonParse(window.localStorage.getItem(DEMO_TRIPS_STORAGE_KEY), []);
+  return Array.isArray(trips) ? trips : [];
 }
 
 function normalizeRequests(requests) {
@@ -996,7 +1347,7 @@ function normalizeRequests(requests) {
       submittedAt: String(request.submittedAt || ""),
       bidMonth: isMonthKey(request.bidMonth) ? request.bidMonth : String(request.date || "").slice(0, 7),
       pilotId: String(request.pilotId || ""),
-      pilotName: String(request.pilotName || "Pilot"),
+      pilotName: getPilotDisplayName(String(request.pilotId || ""), request.pilotName),
       date: String(request.date || ""),
       type: normalizeRequestType(request.type),
       priority: normalizePriority(request.priority),
@@ -1004,6 +1355,23 @@ function normalizeRequests(requests) {
       status: String(request.status || "submitted"),
     }))
     .filter((request) => isDateKey(request.date) && request.status !== "cancelled");
+}
+
+function normalizeTrips(trips) {
+  if (!Array.isArray(trips)) {
+    return [];
+  }
+
+  return trips
+    .map((trip) => ({
+      id: String(trip.id || createId()),
+      submittedAt: String(trip.submittedAt || ""),
+      bidMonth: isMonthKey(trip.bidMonth) ? trip.bidMonth : String(trip.date || "").slice(0, 7),
+      date: String(trip.date || ""),
+      notes: String(trip.notes || ""),
+      status: String(trip.status || "submitted"),
+    }))
+    .filter((trip) => isDateKey(trip.date) && trip.status !== "cancelled");
 }
 
 function normalizePilots(pilots) {
@@ -1174,6 +1542,17 @@ function formatWeekday(dateKey) {
 
 function pluralize(count, singular) {
   return count === 1 ? singular : `${singular}s`;
+}
+
+function formatSaveMessage(savedRequests, savedTrips) {
+  const parts = [];
+  if (savedRequests) {
+    parts.push(`${savedRequests} ${savedRequests === 1 ? "day request" : "day requests"}`);
+  }
+  if (savedTrips) {
+    parts.push(`${savedTrips} ${savedTrips === 1 ? "trip day" : "trip days"}`);
+  }
+  return `${parts.join(" and ")} saved.`;
 }
 
 function formatCsvCell(value) {

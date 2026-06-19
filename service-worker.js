@@ -1,4 +1,4 @@
-const CACHE_NAME = "prismjet-scheduling-v2";
+const CACHE_NAME = "prismjet-scheduling-v3";
 const ASSETS = [
   "./",
   "./index.html",

@@ -1,6 +1,8 @@
 const SCHEDULE = {
   spreadsheetId: "",
   sheetName: "Pilot Requests",
+  tripSheetName: "Scheduled Trips",
+  adminPin: "1111",
   maxRegularDays: 8,
   maxTotalDays: 14,
   maxRequestsPerDay: 1,
@@ -14,15 +16,15 @@ const SCHEDULE = {
     },
     {
       id: "pilot-b",
-      name: "Pilot B",
-      initials: "B",
+      name: "Ian Crouse",
+      initials: "IC",
       color: "#2f7d5b",
       pin: "2222",
     },
     {
       id: "pilot-c",
-      name: "Pilot C",
-      initials: "C",
+      name: "Zach Stolarow",
+      initials: "ZS",
       color: "#b36b20",
       pin: "3333",
     },
@@ -42,8 +44,18 @@ const REQUEST_HEADERS = [
   "Status",
 ];
 
+const TRIP_HEADERS = [
+  "Trip ID",
+  "Submitted At",
+  "Bid Month",
+  "Date",
+  "Notes",
+  "Status",
+];
+
 function setupScheduleSheet() {
   getRequestSheet_();
+  getTripSheet_();
 }
 
 function doGet(event) {
@@ -80,6 +92,7 @@ function handleAction_(action, params) {
       ok: true,
       pilot: getPublicPilot_(pilot),
       requests: getRequests_(),
+      trips: getTrips_(),
       limits: getLimits_(),
     };
   }
@@ -89,6 +102,7 @@ function handleAction_(action, params) {
     return {
       ok: true,
       requests: getRequests_(),
+      trips: getTrips_(),
       limits: getLimits_(),
     };
   }
@@ -97,8 +111,16 @@ function handleAction_(action, params) {
     return submitRequests_(params);
   }
 
+  if (action === "submitTrips") {
+    return submitTrips_(params);
+  }
+
   if (action === "cancel") {
     return cancelRequest_(params);
+  }
+
+  if (action === "cancelTrip") {
+    return cancelTrip_(params);
   }
 
   throw new Error("Unknown schedule action.");
@@ -139,6 +161,44 @@ function submitRequests_(params) {
       ok: true,
       saved: rows.length,
       requests: getRequests_(),
+      trips: getTrips_(),
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function submitTrips_(params) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    requireAdmin_(params.pin);
+    const bidMonth = String(params.bidMonth || "");
+    const days = parseTripDays_(params.days);
+    const notes = String(params.notes || "").slice(0, 300);
+    validateTripSubmission_(bidMonth, days);
+
+    const sheet = getTripSheet_();
+    const submittedAt = new Date();
+    const rows = days.map(function(day) {
+      return [
+        Utilities.getUuid(),
+        submittedAt,
+        bidMonth,
+        day.date,
+        notes,
+        "submitted",
+      ];
+    });
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, TRIP_HEADERS.length).setValues(rows);
+
+    return {
+      ok: true,
+      saved: rows.length,
+      requests: getRequests_(),
+      trips: getTrips_(),
     };
   } finally {
     lock.releaseLock();
@@ -221,6 +281,39 @@ function validateSubmission_(pilot, bidMonth, days) {
   }
 }
 
+function validateTripSubmission_(bidMonth, days) {
+  if (!/^\d{4}-\d{2}$/.test(bidMonth)) {
+    throw new Error("Bid month is invalid.");
+  }
+
+  if (!days.length) {
+    throw new Error("Select at least one trip day.");
+  }
+
+  const seenDates = {};
+  days.forEach(function(day) {
+    if (!isValidDateKey_(day.date) || day.date.indexOf(bidMonth + "-") !== 0) {
+      throw new Error("Trip days must be inside the bid month.");
+    }
+
+    if (seenDates[day.date]) {
+      throw new Error("Each trip date can only be submitted once.");
+    }
+    seenDates[day.date] = true;
+  });
+
+  const existing = getTrips_();
+  const duplicate = days.find(function(day) {
+    return existing.some(function(trip) {
+      return trip.date === day.date && trip.status !== "cancelled";
+    });
+  });
+
+  if (duplicate) {
+    throw new Error(duplicate.date + " already has a scheduled trip.");
+  }
+}
+
 function cancelRequest_(params) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -257,6 +350,49 @@ function cancelRequest_(params) {
       ok: true,
       cancelled: cancelled,
       requests: getRequests_(),
+      trips: getTrips_(),
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function cancelTrip_(params) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    requireAdmin_(params.pin);
+    const date = String(params.date || "");
+
+    if (!isValidDateKey_(date)) {
+      throw new Error("Date is invalid.");
+    }
+
+    const sheet = getTripSheet_();
+    const values = sheet.getDataRange().getValues();
+    let cancelled = 0;
+
+    for (let rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
+      const row = values[rowIndex];
+      const rowDate = formatDateKey_(row[3]);
+      const rowStatus = String(row[5] || "submitted").toLowerCase();
+
+      if (rowDate === date && rowStatus !== "cancelled") {
+        sheet.getRange(rowIndex + 1, 6).setValue("cancelled");
+        cancelled += 1;
+      }
+    }
+
+    if (!cancelled) {
+      throw new Error("That trip day is no longer active.");
+    }
+
+    return {
+      ok: true,
+      cancelled: cancelled,
+      requests: getRequests_(),
+      trips: getTrips_(),
     };
   } finally {
     lock.releaseLock();
@@ -280,6 +416,25 @@ function parseDays_(value) {
       date: String(day.date || ""),
       type: normalizeType_(day.type),
       priority: normalizePriority_(day.priority),
+    };
+  });
+}
+
+function parseTripDays_(value) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(value || "[]"));
+  } catch (error) {
+    throw new Error("Trip days could not be read.");
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Trip days could not be read.");
+  }
+
+  return parsed.map(function(day) {
+    return {
+      date: String(day.date || ""),
     };
   });
 }
@@ -316,6 +471,14 @@ function requirePilot_(pin) {
   return pilot;
 }
 
+function requireAdmin_(pin) {
+  const pilot = requirePilot_(pin);
+  if (String(pin || "").trim() !== String(SCHEDULE.adminPin)) {
+    throw new Error("Only the admin PIN can add or remove trip days.");
+  }
+  return pilot;
+}
+
 function getRequests_() {
   const sheet = getRequestSheet_();
   const values = sheet.getDataRange().getValues();
@@ -342,6 +505,27 @@ function getRequests_() {
   });
 }
 
+function getTrips_() {
+  const sheet = getTripSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) {
+    return [];
+  }
+
+  return values.slice(1).map(function(row, index) {
+    return {
+      id: String(row[0] || "trip-row-" + (index + 2)),
+      submittedAt: formatTimestamp_(row[1]),
+      bidMonth: String(row[2] || ""),
+      date: formatDateKey_(row[3]),
+      notes: String(row[4] || ""),
+      status: String(row[5] || "submitted").toLowerCase(),
+    };
+  }).filter(function(trip) {
+    return trip.date && trip.status !== "cancelled";
+  });
+}
+
 function getRequestSheet_() {
   const spreadsheet = getSpreadsheet_();
   let sheet = spreadsheet.getSheetByName(SCHEDULE.sheetName);
@@ -363,6 +547,33 @@ function getRequestSheet_() {
 
   if (needsHeaders) {
     sheet.getRange(1, 1, 1, REQUEST_HEADERS.length).setValues([REQUEST_HEADERS]);
+    sheet.setFrozenRows(1);
+  }
+
+  return sheet;
+}
+
+function getTripSheet_() {
+  const spreadsheet = getSpreadsheet_();
+  let sheet = spreadsheet.getSheetByName(SCHEDULE.tripSheetName);
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(SCHEDULE.tripSheetName);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(TRIP_HEADERS);
+    sheet.setFrozenRows(1);
+    return sheet;
+  }
+
+  const existingHeaders = sheet.getRange(1, 1, 1, TRIP_HEADERS.length).getValues()[0];
+  const needsHeaders = TRIP_HEADERS.some(function(header, index) {
+    return existingHeaders[index] !== header;
+  });
+
+  if (needsHeaders) {
+    sheet.getRange(1, 1, 1, TRIP_HEADERS.length).setValues([TRIP_HEADERS]);
     sheet.setFrozenRows(1);
   }
 
