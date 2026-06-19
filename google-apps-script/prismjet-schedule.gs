@@ -9,8 +9,8 @@ const SCHEDULE = {
   pilots: [
     {
       id: "pilot-a",
-      name: "Pilot A",
-      initials: "A",
+      name: "Adam Barkley",
+      initials: "AB",
       color: "#2f6fb3",
       pin: "1111",
     },

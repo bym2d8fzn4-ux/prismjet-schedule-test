@@ -7,10 +7,17 @@ const DEFAULT_LIMITS = {
 const ADMIN_PIN = "1111";
 
 const DEMO_PILOTS = [
-  { id: "pilot-a", name: "Pilot A", initials: "A", color: "#2f6fb3" },
+  { id: "pilot-a", name: "Adam Barkley", initials: "AB", color: "#2f6fb3" },
   { id: "pilot-b", name: "Ian Crouse", initials: "IC", color: "#2f7d5b" },
   { id: "pilot-c", name: "Zach Stolarow", initials: "ZS", color: "#b36b20" },
 ];
+
+const PILOT_OVERRIDES = {
+  "pilot-a": {
+    name: "Adam Barkley",
+    initials: "AB",
+  },
+};
 
 const DEMO_PINS = {
   1111: "pilot-a",
@@ -807,7 +814,7 @@ function buildRequestChip(request) {
   chip.style.setProperty("--pilot-color", pilot.color);
   chip.style.setProperty("--chip-text", getReadableTextColor(pilot.color));
   chip.title = `${request.pilotName}: ${REQUEST_TYPE_META[request.type].fullLabel}, ${PRIORITY_META[request.priority].fullLabel}`;
-  chip.textContent = `${REQUEST_TYPE_META[request.type].label} ${PRIORITY_META[request.priority].label}`;
+  chip.textContent = `${pilot.initials} ${REQUEST_TYPE_META[request.type].label} ${PRIORITY_META[request.priority].label}`;
   return chip;
 }
 
@@ -1487,11 +1494,14 @@ function normalizePilots(pilots) {
 }
 
 function normalizePilot(pilot) {
-  const name = String(pilot?.name || "Pilot");
+  const sourceName = String(pilot?.name || "Pilot");
+  const id = String(pilot?.id || sourceName.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "pilot");
+  const override = PILOT_OVERRIDES[id];
+  const name = override?.name || sourceName;
   return {
-    id: String(pilot?.id || name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "pilot"),
+    id,
     name,
-    initials: String(pilot?.initials || getInitials(name)).slice(0, 3).toUpperCase(),
+    initials: String(override?.initials || pilot?.initials || getInitials(name)).slice(0, 3).toUpperCase(),
     color: String(pilot?.color || "#6c6257"),
   };
 }

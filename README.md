@@ -35,7 +35,7 @@ Then open:
 
 Demo PINs:
 
-- Pilot A: `1111`
+- Adam Barkley: `1111`
 - Ian Crouse: `2222`
 - Zach Stolarow: `3333`
 

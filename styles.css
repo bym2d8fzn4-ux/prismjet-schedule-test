@@ -1460,6 +1460,16 @@ h2 {
   white-space: nowrap;
 }
 
+.request-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 6px;
+  font-size: 0.74rem;
+  letter-spacing: 0;
+}
+
 .request-chip-regular {
   border: 1px solid transparent;
   background: var(--pilot-color);
@@ -1826,6 +1836,12 @@ button.pilot-request-day:hover {
     padding: 2px 1px;
     border-radius: 5px;
     font-size: 0.46rem;
+  }
+
+  .request-chip {
+    min-height: 20px;
+    padding: 3px 2px;
+    font-size: 0.54rem;
   }
 
   .draft-row {
