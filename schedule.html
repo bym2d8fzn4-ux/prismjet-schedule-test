@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#090909">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PrismJet Schedule">
+  <title>Pilot Schedule - PrismJet</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell schedule-page">
+    <div class="backdrop backdrop-a"></div>
+    <div class="backdrop backdrop-b"></div>
+
+    <header class="app-header card schedule-header">
+      <div class="app-header-top">
+        <div class="hero-copy">
+          <div class="brand-lockup">
+            <div class="brand-logo-frame">
+              <img class="brand-logo" src="assets/prismjet-logo.svg" alt="PrismJet">
+            </div>
+          </div>
+          <p class="eyebrow">PrismJet pilot scheduling</p>
+          <h1>Days Off Bid</h1>
+          <p class="hero-text" id="session-summary">Shared calendar for regular days off and PTO requests.</p>
+        </div>
+
+        <button class="primary-button new-expense-link" id="refresh-schedule-button" type="button" hidden>Refresh</button>
+      </div>
+
+      <div class="header-actions">
+        <a class="secondary-button" href="index.html">Trip Ledger</a>
+        <button class="secondary-button" id="sign-out-button" type="button" hidden>Sign Out</button>
+      </div>
+
+      <p class="install-tip schedule-mode-banner" id="schedule-mode-banner" hidden></p>
+    </header>
+
+    <main class="layout schedule-layout">
+      <section class="card form-card schedule-login-panel" id="login-panel">
+        <form id="login-form" novalidate>
+          <div class="field-grid login-grid">
+            <label class="field">
+              <span>Pilot PIN</span>
+              <input id="pilot-pin" name="pin" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required>
+            </label>
+            <button class="primary-button login-button" type="submit">Open Schedule</button>
+          </div>
+          <p class="form-message" id="auth-message" role="status"></p>
+        </form>
+      </section>
+
+      <div class="schedule-app" id="schedule-app" hidden>
+        <section class="status-grid schedule-status-grid" aria-label="Draft totals">
+          <div class="status-tile schedule-status-tile card" aria-live="polite">
+            <span class="summary-label">Regular days</span>
+            <span class="summary-value" id="regular-count">0/8</span>
+            <span class="summary-meta">OFF limit</span>
+          </div>
+
+          <div class="status-tile schedule-status-tile card" aria-live="polite">
+            <span class="summary-label">Combined days</span>
+            <span class="summary-value" id="total-count">0/14</span>
+            <span class="summary-meta">OFF + PTO</span>
+          </div>
+
+          <div class="status-tile schedule-status-tile card" aria-live="polite">
+            <span class="summary-label">Month requests</span>
+            <span class="summary-value" id="month-request-count">0</span>
+            <span class="summary-meta" id="month-request-caption">Current bid month</span>
+          </div>
+        </section>
+
+        <section class="card form-card schedule-controls-card">
+          <div class="schedule-month-bar">
+            <div>
+              <p class="section-eyebrow">Bid month</p>
+              <h2 id="month-heading">Month</h2>
+            </div>
+            <div class="month-actions">
+              <button class="inline-button icon-button" id="previous-month-button" type="button" aria-label="Previous month">&lt;</button>
+              <label class="field month-picker-field">
+                <span>Month</span>
+                <input id="bid-month" name="bidMonth" type="month">
+              </label>
+              <button class="inline-button icon-button" id="next-month-button" type="button" aria-label="Next month">&gt;</button>
+            </div>
+          </div>
+
+          <div class="field-grid schedule-choice-grid">
+            <fieldset class="entry-type-picker schedule-picker" id="request-type-picker">
+              <legend>Request type</legend>
+              <label class="entry-type-option">
+                <input name="requestType" type="radio" value="regular" checked>
+                <span>OFF</span>
+              </label>
+              <label class="entry-type-option">
+                <input name="requestType" type="radio" value="pto">
+                <span>PTO</span>
+              </label>
+            </fieldset>
+
+            <fieldset class="entry-type-picker schedule-picker priority-picker" id="priority-picker">
+              <legend>Priority</legend>
+              <label class="entry-type-option">
+                <input name="priority" type="radio" value="high" checked>
+                <span>High</span>
+              </label>
+              <label class="entry-type-option">
+                <input name="priority" type="radio" value="medium">
+                <span>Medium</span>
+              </label>
+              <label class="entry-type-option">
+                <input name="priority" type="radio" value="low">
+                <span>Low</span>
+              </label>
+            </fieldset>
+          </div>
+        </section>
+
+        <section class="card list-panel schedule-calendar-panel">
+          <div class="list-panel-heading">
+            <div>
+              <p class="section-eyebrow">Shared calendar</p>
+              <h2 id="calendar-heading">Calendar</h2>
+              <p class="list-caption" id="calendar-caption">Tap open days to add them to your draft.</p>
+            </div>
+          </div>
+
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>Sun</span>
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+          </div>
+          <div class="schedule-calendar-grid" id="calendar-grid"></div>
+        </section>
+
+        <section class="card list-panel draft-panel">
+          <div class="list-panel-heading">
+            <div>
+              <p class="section-eyebrow">Draft request</p>
+              <h2>Selected Days</h2>
+              <p class="list-caption" id="draft-caption">No days selected.</p>
+            </div>
+            <button class="inline-button danger-inline" id="clear-draft-button" type="button">Clear</button>
+          </div>
+
+          <div class="draft-list" id="draft-list"></div>
+
+          <label class="field field-wide schedule-notes-field">
+            <span>Notes</span>
+            <textarea id="request-notes" rows="3" maxlength="300" placeholder="Optional"></textarea>
+          </label>
+
+          <div class="form-actions">
+            <button class="primary-button" id="submit-request-button" type="button">Submit Request</button>
+          </div>
+
+          <p class="form-message" id="schedule-message" role="status"></p>
+        </section>
+
+        <section class="card list-panel month-requests-panel">
+          <div class="list-panel-heading">
+            <div>
+              <p class="section-eyebrow">Current month</p>
+              <h2>Submitted Requests</h2>
+              <p class="list-caption" id="month-list-caption">No requests submitted.</p>
+            </div>
+          </div>
+          <div class="month-request-list" id="month-request-list"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="schedule-config.js"></script>
+  <script src="schedule.js" type="module"></script>
+</body>
+</html>

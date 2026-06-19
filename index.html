@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#090909">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Trip Ledger">
+  <title>Trip Ledger • PrismJet</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <div class="backdrop backdrop-a"></div>
+    <div class="backdrop backdrop-b"></div>
+
+    <header class="app-header card">
+      <div class="app-header-top">
+        <div class="hero-copy">
+          <div class="brand-lockup">
+            <div class="brand-logo-frame">
+              <img class="brand-logo" src="assets/prismjet-logo.svg" alt="PrismJet">
+            </div>
+          </div>
+          <p class="eyebrow">PrismJet travel expense tracker</p>
+          <h1>Trip Ledger</h1>
+          <p class="hero-text">Track what you spent, what you submitted, and what has been paid back.</p>
+        </div>
+
+        <a class="primary-button new-expense-link" id="new-entry-link" href="expense.html?type=expense">New Expense</a>
+      </div>
+
+      <div class="header-actions">
+        <button class="secondary-button" id="export-button" type="button">Export Backup</button>
+        <a class="secondary-button" href="report.html">Export Report</a>
+        <a class="secondary-button" href="schedule.html">Pilot Schedule</a>
+        <button class="secondary-button" id="import-button" type="button">Import Backup / CSV</button>
+        <button class="secondary-button danger-button" id="clear-button" type="button">Delete All Entries</button>
+        <input id="import-input" type="file" accept=".json,application/json,.csv,text/csv" hidden>
+      </div>
+
+      <p class="install-tip">
+        Add to Home Screen in Safari for the best iPhone experience.
+        <span class="storage-tip" id="storage-status">Saved on this device. Export a backup regularly for safety.</span>
+      </p>
+    </header>
+
+    <main class="layout compact-layout">
+      <section class="ledger-toggle" aria-label="Record type">
+        <button class="ledger-toggle-button active" data-record-type="expense" type="button" aria-pressed="true">Expenses</button>
+        <button class="ledger-toggle-button" data-record-type="incentive" type="button" aria-pressed="false">Incentives</button>
+      </section>
+
+      <section class="status-grid" aria-label="Expense categories">
+        <button class="status-tile card active" data-view="to-submit" type="button" aria-pressed="true">
+          <span class="summary-label">Ready to submit</span>
+          <span class="summary-value" id="summary-to-submit">$0.00</span>
+          <span class="summary-meta" id="summary-to-submit-count">0 expenses</span>
+        </button>
+
+        <button class="status-tile card" data-view="submitted" type="button" aria-pressed="false">
+          <span class="summary-label">Awaiting reimbursement</span>
+          <span class="summary-value" id="summary-awaiting">$0.00</span>
+          <span class="summary-meta" id="summary-awaiting-count">0 expenses</span>
+        </button>
+
+        <button class="status-tile card" data-view="reimbursed" type="button" aria-pressed="false">
+          <span class="summary-label">Reimbursed</span>
+          <span class="summary-value" id="summary-reimbursed">$0.00</span>
+          <span class="summary-meta" id="summary-reimbursed-count">0 expenses</span>
+        </button>
+      </section>
+
+      <section class="card list-panel">
+        <div class="list-panel-heading">
+          <div>
+            <p class="section-eyebrow">Current view</p>
+            <h2 id="list-heading">Ready to submit</h2>
+            <p class="list-caption" id="list-caption">0 expenses • $0.00</p>
+          </div>
+        </div>
+
+        <div class="expense-list" id="expense-list" aria-live="polite"></div>
+
+        <template id="expense-card-template">
+          <article class="expense-card">
+            <div class="expense-card-top">
+              <div class="expense-primary">
+                <p class="expense-merchant"></p>
+                <p class="expense-meta"></p>
+              </div>
+              <div class="expense-amount"></div>
+            </div>
+
+            <div class="expense-badges"></div>
+            <p class="expense-location"></p>
+            <p class="expense-notes"></p>
+            <img class="expense-photo" alt="Receipt photo">
+
+            <dl class="expense-timeline"></dl>
+
+            <div class="expense-actions">
+              <button class="inline-button" data-action="quick-status" type="button"></button>
+              <button class="inline-button" data-action="edit" type="button">Edit</button>
+              <button class="inline-button danger-inline" data-action="delete" type="button">Delete</button>
+            </div>
+          </article>
+        </template>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

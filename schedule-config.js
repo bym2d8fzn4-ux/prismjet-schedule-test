@@ -1,0 +1,1 @@
+window.PRISMJET_SCHEDULE_API_URL = "";
