@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#090909">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="PrismJet Schedule">
-  <title>Pilot Schedule - PrismJet</title>
+  <meta name="apple-mobile-web-app-title" content="Scheduling">
+  <title>Scheduling - PrismJet</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/schedule-icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -31,12 +31,18 @@
           <p class="hero-text" id="session-summary">Shared calendar for regular days off and PTO requests.</p>
         </div>
 
-        <button class="primary-button new-expense-link" id="refresh-schedule-button" type="button" hidden>Refresh</button>
-      </div>
-
-      <div class="header-actions">
-        <a class="secondary-button" href="index.html">Trip Ledger</a>
-        <button class="secondary-button" id="sign-out-button" type="button" hidden>Sign Out</button>
+        <div class="schedule-menu-wrap">
+          <button class="secondary-button schedule-menu-button" id="schedule-menu-button" type="button" aria-expanded="false" aria-controls="schedule-menu" aria-label="Open menu" hidden>
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div class="schedule-menu card" id="schedule-menu" hidden>
+            <button type="button" id="refresh-schedule-button">Refresh Calendar</button>
+            <button type="button" id="export-calendar-button">Export Excel</button>
+            <button type="button" id="sign-out-button" hidden>Sign Out</button>
+          </div>
+        </div>
       </div>
 
       <p class="install-tip schedule-mode-banner" id="schedule-mode-banner" hidden></p>
@@ -145,39 +151,13 @@
           <div class="schedule-calendar-grid" id="calendar-grid"></div>
         </section>
 
-        <section class="card list-panel draft-panel">
-          <div class="list-panel-heading">
-            <div>
-              <p class="section-eyebrow">Draft request</p>
-              <h2>Selected Days</h2>
-              <p class="list-caption" id="draft-caption">No days selected.</p>
-            </div>
-            <button class="inline-button danger-inline" id="clear-draft-button" type="button">Clear</button>
-          </div>
-
-          <div class="draft-list" id="draft-list"></div>
-
-          <label class="field field-wide schedule-notes-field">
-            <span>Notes</span>
-            <textarea id="request-notes" rows="3" maxlength="300" placeholder="Optional"></textarea>
-          </label>
-
+        <section class="schedule-submit-panel">
           <div class="form-actions">
             <button class="primary-button" id="submit-request-button" type="button">Submit Request</button>
           </div>
 
+          <p class="list-caption" id="draft-caption">No days selected.</p>
           <p class="form-message" id="schedule-message" role="status"></p>
-        </section>
-
-        <section class="card list-panel month-requests-panel">
-          <div class="list-panel-heading">
-            <div>
-              <p class="section-eyebrow">Current month</p>
-              <h2>Submitted Requests</h2>
-              <p class="list-caption" id="month-list-caption">No requests submitted.</p>
-            </div>
-          </div>
-          <div class="month-request-list" id="month-request-list"></div>
         </section>
       </div>
     </main>

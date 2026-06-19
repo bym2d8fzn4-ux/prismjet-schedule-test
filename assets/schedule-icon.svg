@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#090909"/>
+  <g transform="translate(146 102)">
+    <rect x="0" y="34" width="220" height="208" rx="34" fill="#fffdf8"/>
+    <rect x="0" y="34" width="220" height="56" rx="34" fill="#ee7100"/>
+    <rect x="0" y="70" width="220" height="172" rx="34" fill="#fffdf8"/>
+    <rect x="50" y="0" width="24" height="66" rx="12" fill="#fffdf8"/>
+    <rect x="146" y="0" width="24" height="66" rx="12" fill="#fffdf8"/>
+    <g fill="#111">
+      <rect x="42" y="116" width="32" height="28" rx="8"/>
+      <rect x="94" y="116" width="32" height="28" rx="8"/>
+      <rect x="146" y="116" width="32" height="28" rx="8"/>
+      <rect x="42" y="162" width="32" height="28" rx="8"/>
+      <rect x="94" y="162" width="32" height="28" rx="8"/>
+      <rect x="146" y="162" width="32" height="28" rx="8"/>
+    </g>
+  </g>
+  <text x="256" y="406" fill="#fffdf8" text-anchor="middle" font-family="Avenir Next, Helvetica, Arial, sans-serif" font-size="48" font-weight="700">PRISM</text>
+</svg>

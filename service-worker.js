@@ -1,23 +1,16 @@
-const CACHE_NAME = "trip-ledger-v23";
+const CACHE_NAME = "prismjet-scheduling-v2";
 const ASSETS = [
   "./",
   "./index.html",
-  "./expense.html",
-  "./report.html",
   "./schedule.html",
   "./styles.css",
-  "./app.js",
-  "./report.js",
-  "./report-export.js",
-  "./expense.js",
   "./schedule.js",
   "./schedule-config.js",
-  "./storage.js",
   "./manifest.webmanifest",
   "./assets/apple-touch-icon.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
-  "./assets/icon.svg",
+  "./assets/schedule-icon.svg",
   "./assets/prismjet-logo.svg",
 ];
 

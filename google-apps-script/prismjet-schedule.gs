@@ -3,6 +3,7 @@ const SCHEDULE = {
   sheetName: "Pilot Requests",
   maxRegularDays: 8,
   maxTotalDays: 14,
+  maxRequestsPerDay: 1,
   pilots: [
     {
       id: "pilot-a",
@@ -196,6 +197,19 @@ function validateSubmission_(pilot, bidMonth, days) {
     throw new Error("Monthly OFF + PTO days are limited to " + SCHEDULE.maxTotalDays + ". You already have " + existingMonthRequests.length + ".");
   }
 
+  const unavailable = days.find(function(day) {
+    return existing.some(function(request) {
+      return request.date === day.date && request.status !== "cancelled";
+    });
+  });
+
+  if (unavailable) {
+    const existingRequest = existing.find(function(request) {
+      return request.date === unavailable.date && request.status !== "cancelled";
+    });
+    throw new Error(unavailable.date + " already has " + existingRequest.pilotName + " off.");
+  }
+
   const duplicate = days.find(function(day) {
     return existing.some(function(request) {
       return request.pilotId === pilot.id && request.date === day.date && request.status !== "cancelled";
@@ -371,6 +385,7 @@ function getLimits_() {
   return {
     maxRegularDays: SCHEDULE.maxRegularDays,
     maxTotalDays: SCHEDULE.maxTotalDays,
+    maxRequestsPerDay: SCHEDULE.maxRequestsPerDay,
   };
 }
 

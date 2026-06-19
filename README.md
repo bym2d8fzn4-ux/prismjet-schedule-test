@@ -1,33 +1,27 @@
-# Trip Ledger
+# PrismJet Scheduling
 
-Trip Ledger is a small installable iPhone-friendly expense tracker for work travel.
+PrismJet Scheduling is an installable, phone-friendly pilot days-off request app.
 
-It lets you:
+It lets pilots:
 
-- Save the amount, expense date, location, notes, date submitted, and date reimbursed
-- Attach a receipt photo from the camera or photo library
-- Filter expenses by reimbursement status
-- Export a JSON backup so your records are not trapped on one device
-- Open a PrismJet pilot scheduling page for shared days-off requests
+- Log in with a simple pilot PIN
+- View a shared bid-month calendar
+- Select OFF or PTO days with high, medium, or low priority
+- Submit up to 8 OFF days and 14 combined OFF + PTO days per month
+- Cancel their own submitted days by tapping them on the calendar
 
-## Why this version is a web app
-
-This is the fastest way to get you a usable iPhone app without dealing with the App Store first.
-
-Once this page is hosted online, you can open it in Safari on your iPhone and use **Add to Home Screen**. It will behave like an app and can work offline after the first load.
+It also prevents more than one pilot from being off on the same day for a 3-pilot crew.
 
 ## Files
 
-- `index.html`: app layout
-- `schedule.html`: pilot days-off bid calendar
-- `schedule.js`: pilot PIN flow, calendar selection, cumulative monthly request limits, cancellation, and Google Apps Script calls
+- `index.html`: redirects to the scheduler so the expense tracker screen is not the app entry point
+- `schedule.html`: pilot scheduling interface
+- `schedule.js`: PIN flow, calendar selection, monthly limits, cancellation, one-pilot-per-day rule, and export
 - `schedule-config.js`: public URL config for the deployed Google Apps Script web app
 - `google-apps-script/prismjet-schedule.gs`: Google Sheets backend template for PINs and requests
-- `styles.css`: mobile-first styling
-- `app.js`: expense storage, photo handling, filters, import/export
-- `manifest.webmanifest` and `service-worker.js`: installable/offline support
+- `manifest.webmanifest`, `service-worker.js`, and `assets/schedule-icon.svg`: installable app shell and home-screen icon
 
-## Local preview on your Mac
+## Local Preview
 
 From this folder, run:
 
@@ -37,25 +31,17 @@ python3 -m http.server 8000
 
 Then open:
 
-[http://127.0.0.1:8000](http://127.0.0.1:8000)
-
-## Using it on your iPhone
-
-You have a few easy options:
-
-1. Host these files on a simple static site such as GitHub Pages, Netlify, or Vercel.
-2. Open the hosted site in Safari on your iPhone.
-3. Tap **Share** then **Add to Home Screen**.
-
-## Pilot scheduling setup
-
-The schedule page runs in local demo mode until a Google Apps Script URL is added to `schedule-config.js`.
+[http://127.0.0.1:8000/schedule.html](http://127.0.0.1:8000/schedule.html)
 
 Demo PINs:
 
 - Pilot A: `1111`
 - Pilot B: `2222`
 - Pilot C: `3333`
+
+## Shared Google Sheets Setup
+
+The schedule page runs in local demo mode until a Google Apps Script URL is added to `schedule-config.js`.
 
 To make the calendar shared:
 
@@ -72,18 +58,8 @@ To make the calendar shared:
 window.PRISMJET_SCHEDULE_API_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec";
 ```
 
-Keep real pilot PINs in Apps Script only. Do not replace the sample PINs in the GitHub copy if this repository will be public.
+Keep real pilot PINs in Apps Script only. Do not put real PINs in the public GitHub app code.
 
-Pilots can change a submitted day by tapping their own day in the submitted requests list, confirming cancellation, and submitting the corrected day again. Cancelled rows stay in the Google Sheet with `Status` set to `cancelled`.
+## Export
 
-## Important note about storage
-
-Expenses are stored locally in your browser using IndexedDB. That means:
-
-- Your data stays on the device/browser unless you export it
-- Clearing browser/site data can remove saved expenses
-- Exporting backups regularly is a good idea
-
-## Good next step
-
-If you want, the next step can be publishing this so it works on your phone, or converting it into a native iPhone app later.
+Use the hamburger menu in the scheduler to export the selected bid month. The download is an Excel-compatible CSV.

@@ -1,6 +1,7 @@
 const DEFAULT_LIMITS = {
   maxRegularDays: 8,
   maxTotalDays: 14,
+  maxRequestsPerDay: 1,
 };
 
 const DEMO_PILOTS = [
@@ -67,6 +68,9 @@ const elements = {
   authMessage: document.querySelector("#auth-message"),
   scheduleApp: document.querySelector("#schedule-app"),
   refreshButton: document.querySelector("#refresh-schedule-button"),
+  exportButton: document.querySelector("#export-calendar-button"),
+  menuButton: document.querySelector("#schedule-menu-button"),
+  menu: document.querySelector("#schedule-menu"),
   signOutButton: document.querySelector("#sign-out-button"),
   regularCount: document.querySelector("#regular-count"),
   totalCount: document.querySelector("#total-count"),
@@ -82,13 +86,8 @@ const elements = {
   priorityPicker: document.querySelector("#priority-picker"),
   calendarGrid: document.querySelector("#calendar-grid"),
   draftCaption: document.querySelector("#draft-caption"),
-  draftList: document.querySelector("#draft-list"),
-  clearDraftButton: document.querySelector("#clear-draft-button"),
-  requestNotes: document.querySelector("#request-notes"),
   submitRequestButton: document.querySelector("#submit-request-button"),
   scheduleMessage: document.querySelector("#schedule-message"),
-  monthListCaption: document.querySelector("#month-list-caption"),
-  monthRequestList: document.querySelector("#month-request-list"),
 };
 
 if (document.readyState === "loading") {
@@ -112,17 +111,22 @@ function bindEvents() {
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.signOutButton.addEventListener("click", signOut);
   elements.refreshButton.addEventListener("click", refreshRequests);
+  elements.exportButton.addEventListener("click", exportCalendar);
+  elements.menuButton.addEventListener("click", toggleMenu);
+  document.addEventListener("click", closeMenuOnOutsideClick);
   elements.bidMonth.addEventListener("change", handleMonthInput);
   elements.previousMonthButton.addEventListener("click", () => moveMonth(-1));
   elements.nextMonthButton.addEventListener("click", () => moveMonth(1));
   elements.requestTypePicker.addEventListener("change", handlePickerChange);
   elements.priorityPicker.addEventListener("change", handlePickerChange);
   elements.calendarGrid.addEventListener("click", handleCalendarClick);
-  elements.draftList.addEventListener("change", handleDraftChange);
-  elements.draftList.addEventListener("click", handleDraftClick);
-  elements.monthRequestList.addEventListener("click", handleMonthRequestClick);
-  elements.clearDraftButton.addEventListener("click", clearDraft);
   elements.submitRequestButton.addEventListener("click", submitDraft);
+  window.addEventListener("pageshow", refreshRequestsFromStore);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshRequestsFromStore();
+    }
+  });
 }
 
 async function loadConfig() {
@@ -136,6 +140,7 @@ async function loadConfig() {
     state.limits = {
       maxRegularDays: Number(response.limits?.maxRegularDays || DEFAULT_LIMITS.maxRegularDays),
       maxTotalDays: Number(response.limits?.maxTotalDays || DEFAULT_LIMITS.maxTotalDays),
+      maxRequestsPerDay: Number(response.limits?.maxRequestsPerDay || DEFAULT_LIMITS.maxRequestsPerDay),
     };
   } catch (error) {
     console.error(error);
@@ -188,8 +193,8 @@ async function handleLogin(event) {
 function signOut() {
   state.session = null;
   state.draft.clear();
-  elements.requestNotes.value = "";
   showMessage(elements.scheduleMessage, "", "muted");
+  closeMenu();
   renderAll();
   elements.pilotPin.focus();
 }
@@ -210,12 +215,29 @@ async function refreshRequests() {
 
     state.requests = normalizeRequests(response.requests);
     showMessage(elements.scheduleMessage, "Calendar refreshed.", "success");
+    closeMenu();
     renderAll();
   } catch (error) {
     console.error(error);
     showMessage(elements.scheduleMessage, error.message || "Calendar could not refresh.", "error");
   } finally {
     setBusy(false);
+  }
+}
+
+async function refreshRequestsFromStore() {
+  if (!state.session) {
+    return;
+  }
+
+  try {
+    const response = await callApi("requests", { pin: state.session.pin });
+    if (response.ok) {
+      state.requests = normalizeRequests(response.requests);
+      renderAll();
+    }
+  } catch (error) {
+    console.warn("Schedule refresh skipped", error);
   }
 }
 
@@ -251,6 +273,30 @@ function handlePickerChange(event) {
   }
 }
 
+function toggleMenu(event) {
+  event.stopPropagation();
+  const isOpen = !elements.menu.hidden;
+  elements.menu.hidden = isOpen;
+  elements.menuButton.setAttribute("aria-expanded", isOpen ? "false" : "true");
+}
+
+function closeMenuOnOutsideClick(event) {
+  if (elements.menu.hidden) {
+    return;
+  }
+
+  if (elements.menu.contains(event.target) || elements.menuButton.contains(event.target)) {
+    return;
+  }
+
+  closeMenu();
+}
+
+function closeMenu() {
+  elements.menu.hidden = true;
+  elements.menuButton.setAttribute("aria-expanded", "false");
+}
+
 function handleCalendarClick(event) {
   const dayButton = event.target.closest("[data-date]");
   if (!dayButton || dayButton.disabled) {
@@ -266,8 +312,16 @@ function handleCalendarClick(event) {
     return;
   }
 
-  if (hasOwnSubmittedRequest(date)) {
-    showMessage(elements.scheduleMessage, `You already submitted ${formatShortDate(date)}.`, "error");
+  const ownRequest = getOwnRequestForDate(date);
+  if (ownRequest) {
+    cancelSubmittedDate(date);
+    return;
+  }
+
+  const existingRequests = getRequestsForDate(date);
+  if (existingRequests.length >= state.limits.maxRequestsPerDay) {
+    const existing = existingRequests[0];
+    showMessage(elements.scheduleMessage, `${formatShortDate(date)} already has ${existing.pilotName} off.`, "error");
     return;
   }
 
@@ -290,59 +344,7 @@ function handleCalendarClick(event) {
   renderAll();
 }
 
-function handleDraftChange(event) {
-  const target = event.target;
-  const row = target.closest("[data-draft-date]");
-  if (!row || !target.dataset.draftField) {
-    return;
-  }
-
-  const date = row.dataset.draftDate;
-  const existing = state.draft.get(date);
-  if (!existing) {
-    return;
-  }
-
-  const nextItem = {
-    ...existing,
-    [target.dataset.draftField]: target.value,
-  };
-  const nextDraft = new Map(state.draft);
-  nextDraft.set(date, nextItem);
-  const error = validateDraft([...nextDraft.values()]);
-
-  if (error) {
-    showMessage(elements.scheduleMessage, error, "error");
-    renderDraft();
-    renderSummary();
-    renderCalendar();
-    return;
-  }
-
-  state.draft = nextDraft;
-  showMessage(elements.scheduleMessage, `${formatShortDate(date)} updated.`, "success");
-  renderAll();
-}
-
-function handleDraftClick(event) {
-  const removeButton = event.target.closest("[data-remove-draft]");
-  if (!removeButton) {
-    return;
-  }
-
-  const date = removeButton.dataset.removeDraft;
-  state.draft.delete(date);
-  showMessage(elements.scheduleMessage, `${formatShortDate(date)} removed from draft.`, "muted");
-  renderAll();
-}
-
-async function handleMonthRequestClick(event) {
-  const cancelButton = event.target.closest("[data-cancel-date]");
-  if (!cancelButton) {
-    return;
-  }
-
-  const date = cancelButton.dataset.cancelDate;
+async function cancelSubmittedDate(date) {
   const request = getOwnRequestForDate(date);
   if (!request) {
     showMessage(elements.scheduleMessage, "That request is no longer active.", "error");
@@ -379,15 +381,48 @@ async function handleMonthRequestClick(event) {
   }
 }
 
-function clearDraft() {
-  if (!state.draft.size) {
+async function exportCalendar() {
+  if (!state.session) {
     return;
   }
 
-  state.draft.clear();
-  elements.requestNotes.value = "";
-  showMessage(elements.scheduleMessage, "Draft cleared.", "muted");
-  renderAll();
+  closeMenu();
+
+  try {
+    const response = await callApi("requests", { pin: state.session.pin });
+    if (response.ok) {
+      state.requests = normalizeRequests(response.requests);
+      renderAll();
+    }
+  } catch (error) {
+    console.warn("Export used the currently loaded calendar", error);
+  }
+
+  const rows = getRequestsForMonth(state.selectedMonth);
+  const headers = ["Bid Month", "Date", "Pilot", "Type", "Priority", "Submitted At", "Notes"];
+  const csvRows = [
+    headers,
+    ...rows.map((request) => [
+      request.bidMonth,
+      request.date,
+      request.pilotName,
+      REQUEST_TYPE_META[request.type].label,
+      PRIORITY_META[request.priority].fullLabel,
+      request.submittedAt,
+      request.notes,
+    ]),
+  ];
+  const csv = csvRows.map((row) => row.map(formatCsvCell).join(",")).join("\r\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `prismjet-scheduling-${state.selectedMonth}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showMessage(elements.scheduleMessage, `Exported ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`, "success");
 }
 
 async function submitDraft() {
@@ -415,7 +450,7 @@ async function submitDraft() {
     const response = await callApi("submit", {
       pin: state.session.pin,
       bidMonth: state.selectedMonth,
-      notes: elements.requestNotes.value.trim(),
+      notes: "",
       days: JSON.stringify(days),
     });
 
@@ -425,7 +460,6 @@ async function submitDraft() {
 
     state.requests = normalizeRequests(response.requests);
     state.draft.clear();
-    elements.requestNotes.value = "";
     showMessage(elements.scheduleMessage, `${response.saved || days.length} day request saved.`, "success");
     renderAll();
   } catch (error) {
@@ -441,7 +475,6 @@ function renderAll() {
   renderSummary();
   renderCalendar();
   renderDraft();
-  renderMonthRequests();
 }
 
 function renderModeBanner() {
@@ -459,8 +492,10 @@ function renderSessionState() {
   const isLoggedIn = Boolean(state.session);
   elements.loginPanel.hidden = isLoggedIn;
   elements.scheduleApp.hidden = !isLoggedIn;
-  elements.refreshButton.hidden = !isLoggedIn;
   elements.signOutButton.hidden = !isLoggedIn;
+  elements.menuButton.hidden = !isLoggedIn;
+  elements.menu.hidden = true;
+  elements.menuButton.setAttribute("aria-expanded", "false");
 
   if (!isLoggedIn) {
     elements.sessionSummary.textContent = "Shared calendar for regular days off and PTO requests.";
@@ -485,7 +520,7 @@ function renderSummary() {
   elements.monthRequestCaption.textContent = monthLabel;
   elements.monthHeading.textContent = monthLabel;
   elements.calendarHeading.textContent = monthLabel;
-  elements.calendarCaption.textContent = `${monthRequests.length} submitted ${pluralize(monthRequests.length, "request")}.`;
+  elements.calendarCaption.textContent = `${monthRequests.length} submitted ${pluralize(monthRequests.length, "request")}. Tap your own submitted day to cancel it.`;
 }
 
 function renderCalendar() {
@@ -525,6 +560,10 @@ function renderCalendar() {
       button.classList.add("own-request");
     }
 
+    if (requests.length >= state.limits.maxRequestsPerDay && !hasOwnRequest) {
+      button.classList.add("unavailable");
+    }
+
     const dayNumber = document.createElement("span");
     dayNumber.className = "calendar-day-number";
     dayNumber.textContent = String(day);
@@ -549,99 +588,7 @@ function renderDraft() {
   elements.draftCaption.textContent = days.length
     ? `${regularCount} OFF, ${days.length - regularCount} PTO, ${days.length} total`
     : "No days selected.";
-  elements.clearDraftButton.disabled = !days.length;
   elements.submitRequestButton.disabled = !days.length;
-  elements.draftList.innerHTML = "";
-
-  if (!days.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state compact-empty-state";
-    emptyState.textContent = "Select days from the calendar.";
-    elements.draftList.appendChild(emptyState);
-    return;
-  }
-
-  days.forEach((day) => {
-    elements.draftList.appendChild(buildDraftRow(day));
-  });
-}
-
-function renderMonthRequests() {
-  const requests = getRequestsForMonth(state.selectedMonth);
-  elements.monthRequestList.innerHTML = "";
-  elements.monthListCaption.textContent = requests.length
-    ? `${requests.length} submitted ${pluralize(requests.length, "request")}. Tap your own days to cancel.`
-    : "No requests submitted.";
-
-  if (!requests.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state compact-empty-state";
-    emptyState.textContent = "No requests for this bid month.";
-    elements.monthRequestList.appendChild(emptyState);
-    return;
-  }
-
-  const grouped = groupRequestsByPilot(requests);
-  grouped.forEach((group) => {
-    const card = document.createElement("article");
-    card.className = "pilot-request-group";
-    const pilot = getPilot(group.pilotId);
-    card.style.setProperty("--pilot-color", pilot.color);
-    card.innerHTML = `
-      <div class="pilot-request-group-header">
-        <span class="pilot-color-dot"></span>
-        <strong>${escapeHtml(group.pilotName)}</strong>
-        <span>${group.requests.length} ${pluralize(group.requests.length, "day")}</span>
-      </div>
-    `;
-
-    const list = document.createElement("div");
-    list.className = "pilot-request-days";
-    group.requests.forEach((request) => {
-      const isOwnRequest = state.session && request.pilotId === state.session.pilot.id;
-      const item = document.createElement(isOwnRequest ? "button" : "span");
-      item.className = "pilot-request-day";
-      item.textContent = `${formatShortDate(request.date)} ${REQUEST_TYPE_META[request.type].label} ${PRIORITY_META[request.priority].label}`;
-      if (isOwnRequest) {
-        item.type = "button";
-        item.dataset.cancelDate = request.date;
-        item.title = `Cancel ${formatShortDate(request.date)}`;
-        item.setAttribute("aria-label", `Cancel ${formatShortDate(request.date)} ${REQUEST_TYPE_META[request.type].label}`);
-      }
-      list.appendChild(item);
-    });
-    card.appendChild(list);
-    elements.monthRequestList.appendChild(card);
-  });
-}
-
-function buildDraftRow(day) {
-  const row = document.createElement("article");
-  row.className = "draft-row";
-  row.dataset.draftDate = day.date;
-  row.innerHTML = `
-    <div class="draft-date">
-      <strong>${formatShortDate(day.date)}</strong>
-      <span>${formatWeekday(day.date)}</span>
-    </div>
-    <label class="draft-select">
-      <span>Type</span>
-      <select data-draft-field="type" aria-label="Request type for ${formatShortDate(day.date)}">
-        <option value="regular"${day.type === "regular" ? " selected" : ""}>OFF</option>
-        <option value="pto"${day.type === "pto" ? " selected" : ""}>PTO</option>
-      </select>
-    </label>
-    <label class="draft-select">
-      <span>Priority</span>
-      <select data-draft-field="priority" aria-label="Priority for ${formatShortDate(day.date)}">
-        <option value="high"${day.priority === "high" ? " selected" : ""}>High</option>
-        <option value="medium"${day.priority === "medium" ? " selected" : ""}>Medium</option>
-        <option value="low"${day.priority === "low" ? " selected" : ""}>Low</option>
-      </select>
-    </label>
-    <button class="inline-button draft-remove-button" type="button" data-remove-draft="${day.date}" aria-label="Remove ${formatShortDate(day.date)}">x</button>
-  `;
-  return row;
 }
 
 function buildRequestChip(request) {
@@ -704,6 +651,12 @@ function validateDraft(days) {
   const invalidDay = days.find((day) => !day.date.startsWith(`${state.selectedMonth}-`));
   if (invalidDay) {
     return "Selected days must be inside the bid month.";
+  }
+
+  const unavailableDay = days.find((day) => getRequestsForDate(day.date).length >= state.limits.maxRequestsPerDay);
+  if (unavailableDay) {
+    const existing = getRequestsForDate(unavailableDay.date)[0];
+    return `${formatShortDate(unavailableDay.date)} already has ${existing.pilotName} off.`;
   }
 
   return "";
@@ -1004,6 +957,14 @@ function validateSubmittedDays(days, bidMonth, pilotId, existingRequests) {
     return "Selected days must be inside the bid month.";
   }
 
+  const unavailable = normalizedDays.find((day) =>
+    existingRequests.some((request) => request.date === day.date && request.status !== "cancelled")
+  );
+  if (unavailable) {
+    const existing = existingRequests.find((request) => request.date === unavailable.date && request.status !== "cancelled");
+    return `${formatShortDate(unavailable.date)} already has ${existing.pilotName} off.`;
+  }
+
   const duplicate = normalizedDays.find((day) =>
     existingRequests.some((request) => request.pilotId === pilotId && request.date === day.date && request.status !== "cancelled")
   );
@@ -1086,17 +1047,22 @@ function setBusy(isBusy) {
   [
     elements.pilotPin,
     elements.refreshButton,
+    elements.exportButton,
+    elements.menuButton,
     elements.signOutButton,
     elements.bidMonth,
     elements.previousMonthButton,
     elements.nextMonthButton,
-    elements.clearDraftButton,
     elements.submitRequestButton,
   ].forEach((element) => {
     if (element) {
       element.disabled = isBusy;
     }
   });
+
+  if (elements.submitRequestButton) {
+    elements.submitRequestButton.disabled = isBusy || !state.draft.size;
+  }
 }
 
 function showMessage(element, message, tone = "muted") {
@@ -1208,6 +1174,11 @@ function formatWeekday(dateKey) {
 
 function pluralize(count, singular) {
   return count === 1 ? singular : `${singular}s`;
+}
+
+function formatCsvCell(value) {
+  const cell = String(value ?? "");
+  return `"${cell.replaceAll('"', '""')}"`;
 }
 
 function getInitials(name) {
